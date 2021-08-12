@@ -2,6 +2,7 @@ import pandas as pd
 import numpy as np
 
 hypothalamus_path = 'hypothalamus.txt'
+liver_path = 'liver.txt'
 genotypes_path = 'BXD.geno'
 
 hypothalamus_expression_df = pd.read_csv(hypothalamus_path,
@@ -9,8 +10,14 @@ hypothalamus_expression_df = pd.read_csv(hypothalamus_path,
                                          comment='#',
                                          index_col=0,
                                          )
+liver_expression_df = pd.read_csv(liver_path,
+                                         sep='\t',
+                                         comment='#',
+                                         index_col=0,
+                                         )
 #hypothalamus_expression_df.columns = hypothalamus_expression_df.iloc[0]
 hypothalamus_expression_df = hypothalamus_expression_df[1:]
+liver_expression_df = liver_expression_df[1:]
 
 genotypes_df = pd.read_csv(genotypes_path,
                            sep='\t',
@@ -26,3 +33,4 @@ for index,row in genotypes_df.iterrows():
     else:
         curr = row
 genotypes_df.drop(index=redundant,inplace=True)
+print(liver_expression_df)
