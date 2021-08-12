@@ -3,7 +3,7 @@ import numpy as np
 
 from scipy.stats import linregress
 from matplotlib import pyplot as plt
-# from statsmodels.stats.multitest import fdrcorrection as bh_procedure
+from statsmodels.stats.multitest import fdrcorrection as bh_procedure
 
 import preprocessing
 
