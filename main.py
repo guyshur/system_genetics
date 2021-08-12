@@ -1,5 +1,8 @@
 import pandas as pd
 import numpy as np
+from scipy.stats import linregress
+from matplotlib import pyplot as plt
+from statsmodels.stats.multitest import fdrcorrection as bh_procedure
 
 hypothalamus_path = 'hypothalamus.txt'
 liver_path = 'liver.txt'
@@ -35,8 +38,8 @@ hypothalamus_expression_df_no_metadata = hypothalamus_expression_df_no_metadata.
 phenotypes_df = phenotypes_df.astype(float)
 
 #hypothalamus_expression_df.columns = hypothalamus_expression_df.iloc[0]
-hypothalamus_expression_df = hypothalamus_expression_df[1:]
-liver_expression_df = liver_expression_df[1:]
+# hypothalamus_expression_df = hypothalamus_expression_df[1:]
+# liver_expression_df = liver_expression_df[1:]
 genotypes_df = pd.read_csv(genotypes_path,
                            sep='\t',
                            comment='#',
@@ -51,10 +54,31 @@ for index,row in genotypes_df.iterrows():
     else:
         curr = row
 genotypes_df.drop(index=redundant,inplace=True)
-liver_expression_df.rename(
+liver_expression_df_no_metadata.rename(
     columns={strain: '_'.join(strain.strip("'").split('_')[:2]) for strain in liver_expression_df.columns},
 inplace=True)
-hypothalamus_expression_df.rename(
+hypothalamus_expression_df_no_metadata.rename(
     columns={strain: '_'.join(strain.strip('"').split('_')[:2]) for strain in liver_expression_df.columns},
 inplace=True)
+phenotypes = [x for x in phenotypes_df.index if 'ethanol' in x.lower() and 'male' in x.lower() and 'female' not in x.lower()]
+phenotypes_df = phenotypes_df.loc[phenotypes,:]
+hypothalamus_expression_df_no_metadata = hypothalamus_expression_df_no_metadata[
+    [column for column in hypothalamus_expression_df_no_metadata if column.startswith('BXD') and column.endswith('_M')]]
+liver_expression_df_no_metadata = liver_expression_df_no_metadata[
+    [column for column in liver_expression_df_no_metadata if column.startswith('BXD') and column.endswith('_M')]]
+liver_expression_df_no_metadata.rename(
+    columns={strain: strain.split('_')[0] for strain in liver_expression_df_no_metadata.columns},
+inplace=True)
+hypothalamus_expression_df_no_metadata.rename(
+    columns={strain: strain.split('_')[0] for strain in hypothalamus_expression_df_no_metadata.columns},
+inplace=True)
+genotypes_numeric = genotypes_df.iloc[:,3:].applymap(lambda genotype: 0 if genotype == 'B' else 1 if genotype == 'H' else 2)
 print(hypothalamus_expression_df_no_metadata)
+print(liver_expression_df_no_metadata)
+print(genotypes_numeric)
+print(phenotypes_df)
+
+# linear regression tests
+
+results: pd.DataFrame = \
+    genotypes_numeric.apply(lambda x: liver_expression_df_no_metadata.apply(lambda y: linregress(x, y)[3], axis=1), axis=1)
