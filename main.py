@@ -3,7 +3,7 @@ import numpy as np
 
 from scipy.stats import linregress
 from matplotlib import pyplot as plt
-from statsmodels.stats.multitest import fdrcorrection as bh_procedure
+# from statsmodels.stats.multitest import fdrcorrection as bh_procedure
 
 import preprocessing
 
@@ -26,11 +26,10 @@ phenotypes_df = pd.read_excel(phenotypes_path,index_col=1)
 phenotypes_df = phenotypes_df[phenotypes_df.columns[4:]]
 
 
-liver_expression_df = preprocessing.remove_liver_metadata(liver_expression_df)
-liver_expression_df = preprocessing.preprocess_expression_data(liver_expression_df)
 
-hypothalamus_expression_df = preprocessing.remove_hyppthalamus_metadata(hypothalamus_expression_df)
-hypothalamus_expression_df = preprocessing.preprocess_expression_data(hypothalamus_expression_df)
+liver_expression_df = preprocessing.preprocess_liver_data(liver_expression_df)
+hypothalamus_expression_df = preprocessing.preprocess_hypo_data(hypothalamus_expression_df)
+
 genotypes_df = pd.read_csv(genotypes_path,
                            sep='\t',
                            comment='#',
