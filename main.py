@@ -4,9 +4,10 @@ import numpy as np
 from scipy.stats import linregress
 from matplotlib import pyplot as plt
 from statsmodels.stats.multitest import fdrcorrection as bh_procedure
-
+import pickle
+import os
 import preprocessing
-
+from sklearn.linear_model import LinearRegression
 
 hypothalamus_path = 'hypothalamus.txt'
 liver_path = 'liver.txt'
@@ -71,24 +72,45 @@ liver_expression_df = liver_expression_df[genotype_liver_strains]
 hypothalamus_expression_df = hypothalamus_expression_df[genotype_hypothalamus_strains]
 
 # linear regression
-results: pd.DataFrame = \
-    genotypes_numeric[genotype_liver_strains].apply(lambda x: liver_expression_df.apply(lambda y: linregress(x, y)[3], axis=1),
-                              axis=1)
+if os.path.isfile('bin/liver_eqtl.pkl'):
+    with open('bin/liver_eqtl.pkl','rb') as f:
+        liver_eqtl_results = pickle.load(f)
+else:
+    liver_eqtl_results: pd.DataFrame = \
+        genotypes_numeric[genotype_liver_strains].apply(lambda x: liver_expression_df.apply(lambda y: linregress(x, y)[3], axis=1),
+                                  axis=1)
+    with open('bin/liver_eqtl.pkl','wb+') as f:
+        pickle.dump(liver_eqtl_results,f)
+
+if os.path.isfile('bin/hypothalamus_eqtl.pkl'):
+    with open('bin/hypothalamus_eqtl.pkl','rb') as f:
+        hypothalamus_eqtl_results = pickle.load(f)
+else:
+    hypothalamus_eqtl_results: pd.DataFrame = \
+        genotypes_numeric[genotype_hypothalamus_strains].apply(lambda x: hypothalamus_expression_df.apply(lambda y: linregress(x, y)[3], axis=1),
+                                  axis=1)
+    with open('bin/hypothalamus_eqtl.pkl','wb+') as f:
+        pickle.dump(hypothalamus_eqtl_results,f)
+
 # multiple test correction
 flattened_results = []
-for _, p_values in results.iterrows():
+for _, p_values in liver_eqtl_results.iterrows():
     flattened_results.extend(p_values)
 bools, flattened_results = bh_procedure(flattened_results)
-num_genes = len(results.columns)
-for i in range(len(results.index)):
-    results.iloc[i, :] = flattened_results[i * num_genes:(i + 1) * num_genes]
+num_genes = len(liver_eqtl_results.columns)
+for i in range(len(liver_eqtl_results.index)):
+    liver_eqtl_results.iloc[i, :] = flattened_results[i * num_genes:(i + 1) * num_genes]
+flattened_results = []
+for _, p_values in hypothalamus_eqtl_results.iterrows():
+    flattened_results.extend(p_values)
+bools, flattened_results = bh_procedure(flattened_results)
+num_genes = len(hypothalamus_eqtl_results.columns)
+for i in range(len(hypothalamus_eqtl_results.index)):
+    hypothalamus_eqtl_results.iloc[i, :] = flattened_results[i * num_genes:(i + 1) * num_genes]
 
 # boolean (is statistically significant) table
-is_significant: pd.DataFrame = results <= 0.05
+liver_significant: pd.DataFrame = liver_eqtl_results <= 0.05
+hypothalamus_significant: pd.DataFrame = hypothalamus_eqtl_results <= 0.05
 
 # dropping genes without eQTLs
-no_assoc_genes = []
-for gene in is_significant.columns:
-    if sum(is_significant.loc[:,gene]) == 0:
-        no_assoc_genes.append(gene)
-is_significant.drop(columns=no_assoc_genes,inplace=True)
+#TODO
