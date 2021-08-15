@@ -8,11 +8,19 @@ import pickle
 import os
 import preprocessing
 from sklearn.linear_model import LinearRegression
-
+# genotypes_df = pd.read_csv(genotypes_path,
+#                            sep='\t',
+#                            comment='#',
+#                            index_col=1
+#                            )
 hypothalamus_path = 'hypothalamus.txt'
 liver_path = 'liver.txt'
-genotypes_path = 'BXD.geno'
+genotypes_path = 'genotypes.xls'
 phenotypes_path = 'phenotypes.xls'
+genotypes_df: pd.DataFrame = pd.read_excel(genotypes_path)
+genotypes_df.columns = genotypes_df.loc[0, :]
+genotypes_df = genotypes_df.iloc[1:, :-3]
+genotypes_df = genotypes_df.set_index('Locus')
 hypothalamus_expression_df = pd.read_csv(hypothalamus_path,
                                          sep='\t',
                                          comment='#',
@@ -31,11 +39,8 @@ phenotypes_df = phenotypes_df[phenotypes_df.columns[4:]]
 liver_expression_df = preprocessing.preprocess_liver_data(liver_expression_df)
 hypothalamus_expression_df = preprocessing.preprocess_hypo_data(hypothalamus_expression_df)
 
-genotypes_df = pd.read_csv(genotypes_path,
-                           sep='\t',
-                           comment='#',
-                           index_col=1
-                           )
+
+
 curr = []
 redundant = []
 for index,row in genotypes_df.iterrows():
@@ -92,6 +97,7 @@ else:
     with open('bin/hypothalamus_eqtl.pkl','wb+') as f:
         pickle.dump(hypothalamus_eqtl_results,f)
 
+
 # multiple test correction
 flattened_results = []
 for _, p_values in liver_eqtl_results.iterrows():
@@ -113,4 +119,13 @@ liver_significant: pd.DataFrame = liver_eqtl_results <= 0.05
 hypothalamus_significant: pd.DataFrame = hypothalamus_eqtl_results <= 0.05
 
 # dropping genes without eQTLs
-#TODO
+weak_genes = []
+for gene in liver_significant:
+    if not any(liver_significant[gene].tolist()):
+        weak_genes.append(gene)
+liver_eqtl_results.drop(columns=weak_genes,inplace=True)
+weak_genes = []
+for gene in hypothalamus_significant:
+    if not any(hypothalamus_significant[gene].tolist()):
+        weak_genes.append(gene)
+hypothalamus_eqtl_results.drop(columns=weak_genes,inplace=True)
