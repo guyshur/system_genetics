@@ -76,6 +76,16 @@ genotype_hypothalamus_strains = genotypes_numeric.columns.intersection(hypothala
 liver_expression_df = liver_expression_df[genotype_liver_strains]
 hypothalamus_expression_df = hypothalamus_expression_df[genotype_hypothalamus_strains]
 
+try:
+    os.mkdir("./data/")
+except FileExistsError:
+    pass
+liver_expression_df.to_csv('./data/liver_expression_preproc_df.csv')
+hypothalamus_expression_df.to_csv('./data/hypothalamus_expression_preproc_df.csv')
+genotypes_df.to_csv('./data/genotypes_preproc_df.csv')
+
+exit()
+
 # linear regression
 if os.path.isfile('bin/liver_eqtl.pkl'):
     with open('bin/liver_eqtl.pkl','rb') as f:
