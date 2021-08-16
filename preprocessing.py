@@ -26,7 +26,7 @@ def preprocess_expression_data(data: pd.DataFrame, min_max_thr = None, min_var_t
 
     # Remove rows with low maximal expression
     if not min_max_thr:
-        min_max_thr = data.max(axis = 1).quantile(.025)
+        min_max_thr = data.max(axis = 1).quantile(.25)
         print("Minimal maximum expression value set as threshold: ", min_max_thr)
 
     mask = data.apply(lambda row: row.max() > min_max_thr, axis=1)
@@ -34,7 +34,7 @@ def preprocess_expression_data(data: pd.DataFrame, min_max_thr = None, min_var_t
 
     # Remove rows with low variance
     if not min_var_thr:
-        min_var_thr = data.var(axis = 1).quantile(.1)
+        min_var_thr = data.var(axis = 1).quantile(.25)
         print("Minimal variance value set as threshold: ", min_var_thr)
 
     mask = data.apply(lambda row: row.var() > min_var_thr, axis=1)

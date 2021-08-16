@@ -80,11 +80,12 @@ try:
     os.mkdir("./data/")
 except FileExistsError:
     pass
+
+# Write intermediate files, after preprocessing
+
 liver_expression_df.to_csv('./data/liver_expression_preproc_df.csv')
 hypothalamus_expression_df.to_csv('./data/hypothalamus_expression_preproc_df.csv')
 genotypes_df.to_csv('./data/genotypes_preproc_df.csv')
-
-exit()
 
 # linear regression
 if os.path.isfile('bin/liver_eqtl.pkl'):
@@ -107,6 +108,7 @@ else:
     with open('bin/hypothalamus_eqtl.pkl','wb+') as f:
         pickle.dump(hypothalamus_eqtl_results,f)
 
+exit()
 
 # multiple test correction
 flattened_results = []
