@@ -7,12 +7,41 @@ from statsmodels.stats.multitest import fdrcorrection as bh_procedure
 import pickle
 import os
 import preprocessing
-from sklearn.linear_model import LinearRegression
-# genotypes_df = pd.read_csv(genotypes_path,
-#                            sep='\t',
-#                            comment='#',
-#                            index_col=1
-#                            )
+
+
+def multiple_test_correction(df: pd.DataFrame) -> None:
+    flattened_results = []
+    for _, p_values in df.iterrows():
+        flattened_results.extend(p_values)
+    bools, flattened_results = bh_procedure(flattened_results)
+    num_genes = len(df.columns)
+    for i in range(len(df.index)):
+        df.iloc[i, :] = flattened_results[i * num_genes:(i + 1) * num_genes]
+
+
+def filter_genes_without_associations(results: pd.DataFrame, is_significant: pd.DataFrame) -> None:
+    weak_genes = []
+    for gene in is_significant:
+        if not any(is_significant[gene].tolist()):
+            weak_genes.append(gene)
+    results.drop(columns=weak_genes, inplace=True)
+
+
+def linear_regression(genotypes: pd.DataFrame, expression: pd.DataFrame,
+                      shared_strains: list, path: str) -> pd.DataFrame:
+    if os.path.isfile(path):
+        with open(path, 'rb') as f:
+            results = pickle.load(f)
+    else:
+        results: pd.DataFrame = \
+            genotypes[shared_strains].apply(
+                lambda x: expression[shared_strains].apply(lambda y: linregress(x, y)[3], axis=1),
+                axis=1)
+        with open(path, 'wb+') as f:
+            pickle.dump(results, f)
+    return results
+
+
 hypothalamus_path = 'hypothalamus.txt'
 liver_path = 'liver.txt'
 genotypes_path = 'genotypes.xls'
@@ -34,12 +63,8 @@ liver_expression_df = pd.read_csv(liver_path,
 phenotypes_df = pd.read_excel(phenotypes_path,index_col=1)
 phenotypes_df = phenotypes_df[phenotypes_df.columns[4:]]
 
-
-
 liver_expression_df = preprocessing.preprocess_liver_data(liver_expression_df)
 hypothalamus_expression_df = preprocessing.preprocess_hypo_data(hypothalamus_expression_df)
-
-
 
 curr = []
 redundant = []
@@ -87,57 +112,13 @@ liver_expression_df.to_csv('./data/liver_expression_preproc_df.csv')
 hypothalamus_expression_df.to_csv('./data/hypothalamus_expression_preproc_df.csv')
 genotypes_df.to_csv('./data/genotypes_preproc_df.csv')
 
-# linear regression
-if os.path.isfile('bin/liver_eqtl.pkl'):
-    with open('bin/liver_eqtl.pkl','rb') as f:
-        liver_eqtl_results = pickle.load(f)
-else:
-    liver_eqtl_results: pd.DataFrame = \
-        genotypes_numeric[genotype_liver_strains].apply(lambda x: liver_expression_df.apply(lambda y: linregress(x, y)[3], axis=1),
-                                  axis=1)
-    with open('bin/liver_eqtl.pkl','wb+') as f:
-        pickle.dump(liver_eqtl_results,f)
-
-if os.path.isfile('bin/hypothalamus_eqtl.pkl'):
-    with open('bin/hypothalamus_eqtl.pkl','rb') as f:
-        hypothalamus_eqtl_results = pickle.load(f)
-else:
-    hypothalamus_eqtl_results: pd.DataFrame = \
-        genotypes_numeric[genotype_hypothalamus_strains].apply(lambda x: hypothalamus_expression_df.apply(lambda y: linregress(x, y)[3], axis=1),
-                                  axis=1)
-    with open('bin/hypothalamus_eqtl.pkl','wb+') as f:
-        pickle.dump(hypothalamus_eqtl_results,f)
-
-exit()
-
-# multiple test correction
-flattened_results = []
-for _, p_values in liver_eqtl_results.iterrows():
-    flattened_results.extend(p_values)
-bools, flattened_results = bh_procedure(flattened_results)
-num_genes = len(liver_eqtl_results.columns)
-for i in range(len(liver_eqtl_results.index)):
-    liver_eqtl_results.iloc[i, :] = flattened_results[i * num_genes:(i + 1) * num_genes]
-flattened_results = []
-for _, p_values in hypothalamus_eqtl_results.iterrows():
-    flattened_results.extend(p_values)
-bools, flattened_results = bh_procedure(flattened_results)
-num_genes = len(hypothalamus_eqtl_results.columns)
-for i in range(len(hypothalamus_eqtl_results.index)):
-    hypothalamus_eqtl_results.iloc[i, :] = flattened_results[i * num_genes:(i + 1) * num_genes]
-
-# boolean (is statistically significant) table
+liver_eqtl_results = linear_regression(genotypes_numeric, liver_expression_df,
+                                       genotype_liver_strains, 'bin/liver_eqtl.pkl')
+hypothalamus_eqtl_results = linear_regression(genotypes_numeric, hypothalamus_expression_df,
+                                       genotype_hypothalamus_strains, 'bin/hypothalamus_eqtl.pkl')
+multiple_test_correction(liver_eqtl_results)
+multiple_test_correction(hypothalamus_eqtl_results)
 liver_significant: pd.DataFrame = liver_eqtl_results <= 0.05
 hypothalamus_significant: pd.DataFrame = hypothalamus_eqtl_results <= 0.05
-
-# dropping genes without eQTLs
-weak_genes = []
-for gene in liver_significant:
-    if not any(liver_significant[gene].tolist()):
-        weak_genes.append(gene)
-liver_eqtl_results.drop(columns=weak_genes,inplace=True)
-weak_genes = []
-for gene in hypothalamus_significant:
-    if not any(hypothalamus_significant[gene].tolist()):
-        weak_genes.append(gene)
-hypothalamus_eqtl_results.drop(columns=weak_genes,inplace=True)
+filter_genes_without_associations(liver_eqtl_results, liver_significant)
+filter_genes_without_associations(hypothalamus_eqtl_results, hypothalamus_significant)
