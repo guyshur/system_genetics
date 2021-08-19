@@ -20,6 +20,12 @@ def multiple_test_correction(df: pd.DataFrame) -> None:
 
 
 def filter_genes_without_associations(results: pd.DataFrame, is_significant: pd.DataFrame) -> None:
+    """
+    removes genes that are not associated with any SNP from the dataframe
+    :param results: a num_snps X num_genes dataframe of multiple-testing-corrected linear regression p values
+    :param is_significant: a boolean dataframe with the same shape as results, with True if the p value is significant
+    :return: Nothing - the change is in place
+    """
     weak_genes = []
     for gene in is_significant:
         if not any(is_significant[gene].tolist()):
@@ -41,6 +47,24 @@ def linear_regression(genotypes: pd.DataFrame, expression: pd.DataFrame,
             pickle.dump(results, f)
     return results
 
+
+def num_significant_genes_per_snp(df_without_weakly_associated_genes: pd.DataFrame) -> pd.Series:
+    """
+    returns a series of SNPs and the number of genes significantly associated with each snp
+    :param df_without_weakly_associated_genes: the expression dataframe after filtering genes without significant
+    eQTLs
+    :return: a pandas series with index = snp names and values = number of genes associated with the SNPs
+    """
+    index = []
+    num_genes = []
+    is_significant: pd.DataFrame = df_without_weakly_associated_genes <= 0.05
+    for snp,genes in is_significant.iterrows():
+        index.append(snp)
+        try:
+            num_genes.append(genes.value_counts()[True])
+        except KeyError:
+            num_genes.append(0)
+    return pd.Series(index=index,data=num_genes)
 
 hypothalamus_path = 'hypothalamus.txt'
 liver_path = 'liver.txt'
@@ -114,11 +138,19 @@ genotypes_df.to_csv('./data/genotypes_preproc_df.csv')
 
 liver_eqtl_results = linear_regression(genotypes_numeric, liver_expression_df,
                                        genotype_liver_strains, 'bin/liver_eqtl.pkl')
+multiple_test_correction(liver_eqtl_results)
+liver_significant: pd.DataFrame = liver_eqtl_results <= 0.05
+print('number of liver eQTLs: {}'.format(liver_significant.stack().value_counts()[True]))
+filter_genes_without_associations(liver_eqtl_results, liver_significant)
+num_of_significant_genes = num_significant_genes_per_snp(liver_eqtl_results)
+plt.hist(num_of_significant_genes,bins=30, label='liver eQTL distribution', alpha=0.5)
+
 hypothalamus_eqtl_results = linear_regression(genotypes_numeric, hypothalamus_expression_df,
                                        genotype_hypothalamus_strains, 'bin/hypothalamus_eqtl.pkl')
-multiple_test_correction(liver_eqtl_results)
 multiple_test_correction(hypothalamus_eqtl_results)
-liver_significant: pd.DataFrame = liver_eqtl_results <= 0.05
 hypothalamus_significant: pd.DataFrame = hypothalamus_eqtl_results <= 0.05
-filter_genes_without_associations(liver_eqtl_results, liver_significant)
+print('number of hypothalamus eQTLs: {}'.format(hypothalamus_significant.stack().value_counts()[True]))
 filter_genes_without_associations(hypothalamus_eqtl_results, hypothalamus_significant)
+num_of_significant_genes = num_significant_genes_per_snp(hypothalamus_eqtl_results)
+plt.hist(num_of_significant_genes,bins=30,label='hypothalamus eQTL distribution',align=0.5)
+plt.savefig('dist.png')
