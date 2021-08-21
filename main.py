@@ -1,12 +1,47 @@
 import pandas as pd
 import numpy as np
 
-from scipy.stats import linregress
+from scipy.stats import linregress, stats
 from matplotlib import pyplot as plt
 from statsmodels.stats.multitest import fdrcorrection as bh_procedure
 import pickle
 import os
 import preprocessing
+
+
+def run_QTL_analysis(genotypes_numeric, phenotypes_df):
+    geno_df = genotypes_numeric.copy()
+    pheno_df = phenotypes_df.copy()
+
+    # Filter out hetrozygous samples and encode genotypes as either 1 or 2.
+    mask = geno_df != 1
+    genotypes_homozygous = geno_df[mask]
+
+    pheno_vs_geno_df = pd.DataFrame(index=genotypes_homozygous.index, columns=pheno_df.index)
+
+    for _, pheno in pheno_df.iterrows():
+        y = pheno
+        y = y.dropna()
+        common = genotypes_homozygous.columns.intersection(y.index)
+        y = y[common]
+        X = genotypes_homozygous[common]
+        reg_models = X.apply(lambda x: stats.linregress(x, y), axis=1)
+        pvals = reg_models.apply(lambda model: model.pvalue)
+        pheno_vs_geno_df[pheno.name] = pvals
+
+    return pheno_vs_geno_df
+
+def fdr_QTL_analysis(QTL_results_df):
+    vec = QTL_results_df.reset_index().melt(id_vars=['Locus'], var_name='pheno', value_name='pval')
+    vec_for_bh = vec[~vec.pval.isna()]
+    vec_corrected = vec_for_bh.copy()
+    bools, corrected = bh_procedure(vec_for_bh.pval)
+    vec_corrected.pval = corrected
+
+    # wide=vec.pivot(index='Locus', columns='pheno', values='pval')
+    wide_corrected = vec_corrected.pivot(index='Locus', columns='pheno', values='pval')
+    return wide_corrected
+
 
 
 def multiple_test_correction(df: pd.DataFrame) -> None:
@@ -108,6 +143,8 @@ inplace=True)
 
 phenotypes = [x for x in phenotypes_df.index if 'ethanol' in x.lower() and 'male' in x.lower() and 'female' not in x.lower()]
 phenotypes_df = phenotypes_df.loc[phenotypes,:]
+phenotypes_df.to_csv('data/phenotypes_filtered_df.csv')
+
 hypothalamus_expression_df = hypothalamus_expression_df[
     [column for column in hypothalamus_expression_df if column.startswith('BXD') and column.endswith('_M')]]
 liver_expression_df = liver_expression_df[
@@ -135,9 +172,15 @@ except FileExistsError:
 liver_expression_df.to_csv('./data/liver_expression_preproc_df.csv')
 hypothalamus_expression_df.to_csv('./data/hypothalamus_expression_preproc_df.csv')
 genotypes_df.to_csv('./data/genotypes_preproc_df.csv')
+genotypes_numeric.to_csv('./data/genotypes_preproc_numeric_df.csv')
+
+QTL_results_not_corrected_df = run_QTL_analysis(genotypes_numeric, phenotypes_df)
+QTL_results_not_corrected_df.to_csv('./data/QTL_results_not_corrected_df.csv')
+QTL_results__corrected_df = fdr_QTL_analysis(QTL_results_not_corrected_df)
 
 liver_eqtl_results = linear_regression(genotypes_numeric, liver_expression_df,
                                        genotype_liver_strains, 'bin/liver_eqtl.pkl')
+
 multiple_test_correction(liver_eqtl_results)
 liver_significant: pd.DataFrame = liver_eqtl_results <= 0.05
 print('number of liver eQTLs: {}'.format(liver_significant.stack().value_counts()[True]))
