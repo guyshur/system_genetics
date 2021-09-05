@@ -8,7 +8,7 @@ import pickle
 import os
 import preprocessing
 
-
+np.seterr('raise')
 def run_QTL_analysis(genotypes_numeric, phenotypes_df):
     geno_df = genotypes_numeric.copy()
     pheno_df = phenotypes_df.copy()
@@ -16,7 +16,6 @@ def run_QTL_analysis(genotypes_numeric, phenotypes_df):
     # Filter out hetrozygous samples and encode genotypes as either 1 or 2.
     mask = geno_df != 1
     genotypes_homozygous = geno_df[mask]
-
     pheno_vs_geno_df = pd.DataFrame(index=genotypes_homozygous.index, columns=pheno_df.index)
 
     for _, pheno in pheno_df.iterrows():
@@ -140,11 +139,12 @@ inplace=True)
 liver_expression_df.rename(
     columns={strain: '_'.join(strain.strip('"').split('_')[:2]) for strain in liver_expression_df.columns},
 inplace=True)
-
-phenotypes = [x for x in phenotypes_df.index if 'ethanol' in x.lower() and 'male' in x.lower() and 'female' not in x.lower()]
+phenotypes_df = phenotypes_df.loc[~phenotypes_df.index.duplicated(),:]
+phenotypes = [x for x in phenotypes_df.index if 'blood' in x.lower() and 'male' in x.lower() and 'female' not in x.lower()]
 phenotypes_df = phenotypes_df.loc[phenotypes,:]
-phenotypes_df.to_csv('data/phenotypes_filtered_df.csv')
+print('num phenotypes: {}'.format(len(phenotypes)))
 
+phenotypes_df.to_csv('data/phenotypes_filtered_df.csv')
 hypothalamus_expression_df = hypothalamus_expression_df[
     [column for column in hypothalamus_expression_df if column.startswith('BXD') and column.endswith('_M')]]
 liver_expression_df = liver_expression_df[
@@ -174,6 +174,65 @@ hypothalamus_expression_df.to_csv('./data/hypothalamus_expression_preproc_df.csv
 genotypes_df.to_csv('./data/genotypes_preproc_df.csv')
 genotypes_numeric.to_csv('./data/genotypes_preproc_numeric_df.csv')
 
+
+
+path = 'bin/qtl.pkl'
+if os.path.isfile(path):
+        with open(path, 'rb') as f:
+            qtls = pickle.load(f)
+else:
+    common_geno_pheno = [x for x in phenotypes_df.columns if x in genotypes_numeric.columns]
+    shared_geno = genotypes_numeric.loc[:,common_geno_pheno]
+    shared_pheno = phenotypes_df.loc[:,common_geno_pheno]
+    assert shared_geno.columns.tolist() == shared_pheno.columns.tolist()
+    qtls = pd.DataFrame(index=shared_geno.index.tolist(), columns=shared_pheno.index.tolist(),dtype=float, data=np.zeros((
+        len(shared_geno.index), len(shared_pheno.index)
+    )))
+    assert all([isinstance(x, str) for x in shared_geno.index.tolist()])
+    assert all([isinstance(x, str) for x in shared_pheno.index.tolist()])
+    to_drop = set()
+    for snp, genotypes in shared_geno.iterrows():
+        for phenotype, phenotype_values in shared_pheno.iterrows():
+            mask = phenotype_values.notna()
+            assert phenotype_values.index.tolist() == genotypes.index.tolist()
+            phenotypes_cp = phenotype_values.copy()[mask]
+            genotypes_cp = genotypes.copy()[mask]
+            assert phenotypes_cp.index.tolist() == genotypes_cp.index.tolist()
+            try:
+                p_val = linregress(genotypes_cp, phenotypes_cp)[3]
+                try:
+                    assert 0 <= p_val <= 1
+                except AssertionError:
+                    print(p_val)
+                    raise AssertionError
+                assert isinstance(p_val, float)
+                qtls.at[snp,phenotype] = p_val
+            except FloatingPointError:  # at least one of the groups (B or D) is empty, can't do regression
+                print(phenotype)
+                to_drop.add(phenotype)
+
+    qtls.drop(columns=list(to_drop),inplace=True)
+    assert not any(qtls.isna().values.flatten().tolist())
+    assert all([isinstance(float(x), float) for x in qtls.values.flatten().tolist()])
+    with open(path, 'wb+') as f:
+        pickle.dump(qtls, f)
+for x in qtls.index:
+    for y in qtls.columns:
+        try:
+            assert isinstance(qtls.at[x,y], float)
+        except AssertionError:
+            print(x,y)
+            print(qtls.at[x,y])
+            exit()
+multiple_test_correction(qtls)
+is_significant = qtls <= 0.05
+
+for snp in qtls.index:
+    for ph in qtls.columns:
+        if qtls.at[snp,ph] <= 0.05:
+            print(ph)
+            continue
+exit()
 QTL_results_not_corrected_df = run_QTL_analysis(genotypes_numeric, phenotypes_df)
 QTL_results_not_corrected_df.to_csv('./data/QTL_results_not_corrected_df.csv')
 QTL_results__corrected_df = fdr_QTL_analysis(QTL_results_not_corrected_df)
