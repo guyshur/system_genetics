@@ -108,6 +108,35 @@ genotypes_df: pd.DataFrame = pd.read_excel(genotypes_path)
 genotypes_df.columns = genotypes_df.loc[0, :]
 genotypes_df = genotypes_df.iloc[1:, :-3]
 genotypes_df = genotypes_df.set_index('Locus')
+
+
+# nearby SNPs table for causality
+path = 'bin/cis_snps.pkl'
+if os.path.isfile(path):
+    with open(path, 'rb') as f:
+         is_cis = pickle.load(f)
+else:
+    genotypes_df['Chr_Build37'] = genotypes_df['Chr_Build37'].astype(int)
+    genotypes_df['Build37_position'] = genotypes_df['Build37_position'].astype(int)
+    dist = 2000000
+    is_cis = pd.DataFrame(index=genotypes_df.index, columns=genotypes_df.index,dtype=bool, data=[
+        [
+            False for _ in range(len(genotypes_df.index))
+        ] for _ in range(len(genotypes_df.index))
+    ])
+    for snp_1 in is_cis.index:
+        for snp_2 in is_cis.columns:
+            if genotypes_df.at[snp_1,'Chr_Build37'] == genotypes_df.at[snp_2,'Chr_Build37'] and \
+                    genotypes_df.at[snp_1, 'Build37_position'] - dist <= \
+                    genotypes_df.at[snp_2, 'Build37_position'] <= \
+                    genotypes_df.at[snp_1, 'Build37_position'] + dist:
+                is_cis.at[snp_1, snp_2] = True
+            else:
+                is_cis.at[snp_1, snp_2] = False
+    with open(path, 'wb+') as f:
+        pickle.dump(is_cis, f)
+print('number of cis snps: {}'.format(is_cis.stack().value_counts()[True]))
+
 hypothalamus_expression_df = pd.read_csv(hypothalamus_path,
                                          sep='\t',
                                          comment='#',
@@ -225,14 +254,10 @@ for x in qtls.index:
             print(qtls.at[x,y])
             exit()
 multiple_test_correction(qtls)
-is_significant = qtls <= 0.05
+qtls_significant = qtls <= 0.05
 
-for snp in qtls.index:
-    for ph in qtls.columns:
-        if qtls.at[snp,ph] <= 0.05:
-            print(ph)
-            continue
-exit()
+
+
 QTL_results_not_corrected_df = run_QTL_analysis(genotypes_numeric, phenotypes_df)
 QTL_results_not_corrected_df.to_csv('./data/QTL_results_not_corrected_df.csv')
 QTL_results__corrected_df = fdr_QTL_analysis(QTL_results_not_corrected_df)
@@ -251,6 +276,7 @@ hypothalamus_eqtl_results = linear_regression(genotypes_numeric, hypothalamus_ex
                                        genotype_hypothalamus_strains, 'bin/hypothalamus_eqtl.pkl')
 multiple_test_correction(hypothalamus_eqtl_results)
 hypothalamus_significant: pd.DataFrame = hypothalamus_eqtl_results <= 0.05
+
 print('number of hypothalamus eQTLs: {}'.format(hypothalamus_significant.stack().value_counts()[True]))
 filter_genes_without_associations(hypothalamus_eqtl_results, hypothalamus_significant)
 num_of_significant_genes = num_significant_genes_per_snp(hypothalamus_eqtl_results)
@@ -260,3 +286,40 @@ plt.title('Distribution of eQTLs')
 plt.xlabel('number of SNPs')
 plt.ylabel('number of significantly associated genes')
 plt.savefig('dist.png')
+
+cis_phenotype_liver = pd.DataFrame(index=qtls.columns,columns=liver_significant.columns, dtype=bool,data=[
+    [
+        False for _ in range(len(liver_significant.columns))
+    ] for _ in range(len(qtls.columns))
+])
+cis_phenotype_hypothalamus = pd.DataFrame(index=qtls.columns,columns=hypothalamus_significant.columns, dtype=bool,data=[
+    [
+        False for _ in range(len(hypothalamus_significant.columns))
+    ] for _ in range(len(qtls.columns))
+])
+
+print('Finding cis significant qtl and liver eqtl')
+for snp_1 in qtls_significant.index:
+    for snp_2 in liver_significant.index:
+        if is_cis.at[snp_1, snp_2]:
+            genes = liver_significant.loc[snp_1,:]
+            genes = genes[genes == True]
+            phenos = qtls_significant.loc[snp_2,:]
+            phenos = phenos[phenos == True]
+            for gene in genes.index:
+                for pheno in phenos.index:
+                    cis_phenotype_liver.at[pheno, gene] = True
+print('number of pairs of cis significant qtls and liver eQTLs: {}'.format(cis_phenotype_liver.stack().value_counts()[True]))
+print(len(cis_phenotype_liver.index)*len(cis_phenotype_liver.columns))
+print('Finding cis significant qtl and hypothalamus eqtl')
+for snp_1 in qtls_significant.index:
+    for snp_2 in hypothalamus_significant.index:
+        if is_cis.at[snp_1, snp_2]:
+            genes = hypothalamus_significant.loc[snp_1,:]
+            genes = genes[genes == True]
+            phenos = qtls_significant.loc[snp_2,:]
+            phenos = phenos[phenos == True]
+            for gene in genes.index:
+                for pheno in phenos.index:
+                    cis_phenotype_hypothalamus.at[pheno, gene] = True
+print('number of pairs of cis significant qtls and hypothalamus eQTLs: {}'.format(cis_phenotype_hypothalamus.stack().value_counts()[True]))
