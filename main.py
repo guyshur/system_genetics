@@ -239,7 +239,6 @@ else:
                 assert isinstance(p_val, float)
                 qtls.at[snp, phenotype] = p_val
             except FloatingPointError:  # at least one of the groups (B or D) is empty, can't do regression
-                print(phenotype)
                 to_drop.add(phenotype)
 
     qtls.drop(columns=list(to_drop), inplace=True)
@@ -324,8 +323,6 @@ for snp in qtls_significant.index:
             for pheno in phenos.index:
                 hypo_triplets.add((snp, gene, pheno))
 print('number of pairs of cis significant qtls and liver eQTLs: {}'.format(len(hypo_triplets)))
-print('liver triplets: {}'.format(liver_triplets))
-print('hypo triplets: {}'.format(hypo_triplets))
 liver_triplets = list(liver_triplets)
 hypo_triplets = list(hypo_triplets)
 # shared strains only
@@ -447,12 +444,11 @@ def get_p_C_given_R(triplet_dataframe: pd.DataFrame):
 
 def get_likelihoods(triplet_dataframe: pd.DataFrame):
     triplet_dataframe['m1_likelihood'] = triplet_dataframe.apply(
-        lambda row: 0,5 * row['p_R|L'] * row['p_C|R'], axis=1)
+        lambda row: 0.5 * row['p_R|L'] * row['p_C|R'], axis=1)
     triplet_dataframe['m2_likelihood'] = triplet_dataframe.apply(
-        lambda row: 0, 5 * row['p_C|L'] * row['p_R|C'], axis=1)
+        lambda row: 0.5 * row['p_C|L'] * row['p_R|C'], axis=1)
     triplet_dataframe['m3_likelihood'] = triplet_dataframe.apply(
-        lambda row: 0, 5 * row['p_R|L'] * row['p_C|L'], axis=1)
-
+        lambda row: 0.5 * row['p_R|L'] * row['p_C|L'], axis=1)
 
 def get_likelihood_ratio(triplet_dataframe: pd.DataFrame):
     complete_likelihoods = [np.prod(triplet_dataframe['m1_likelihood']),
@@ -461,7 +457,7 @@ def get_likelihood_ratio(triplet_dataframe: pd.DataFrame):
     most_likely = np.max(complete_likelihoods)
     most_likely_index = complete_likelihoods.index(most_likely)
     complete_likelihoods.remove(most_likely)
-    likelihood_ratio = most_likely/np.prod(complete_likelihoods)
+    likelihood_ratio = most_likely/np.max(complete_likelihoods)
     return likelihood_ratio, most_likely_index+1
 
 
@@ -474,6 +470,7 @@ def _calculate_hypothesis_for_table(triplet_dataframe:pd.DataFrame):
     get_p_C_given_L(triplet_dataframe)
     get_p_R_given_C(triplet_dataframe)
     get_p_C_given_R(triplet_dataframe)
+    get_likelihoods(triplet_dataframe)
     return get_likelihood_ratio(triplet_dataframe)
 
 
@@ -521,5 +518,18 @@ def get_likelihood_ratio_and_permutation_p_value(triplet: tuple, expression_data
     return ratio, selected_model, len([x for x in ratios if x >= ratio])/100
 
 
-triplet = liver_triplets[0]
-print(get_likelihood_ratio_and_permutation_p_value(triplet, liver_expression_df, shared_strains_liver))
+def calculate_hypotheses_and_export(triplets, expression_dataframe, strains, dest):
+    output = {'SNP': [], 'gene': [], 'phenotype': [], 'likelihood_ratio':[], 'model': [], 'p_value': []}
+    for triplet in triplets:
+        output['SNP'].append(triplet[0])
+        output['gene'].append(triplet[1])
+        output['phenotype'].append(triplet[2])
+        ratio, model, p_val = get_likelihood_ratio_and_permutation_p_value(triplet, expression_dataframe, strains)
+        output['likelihood_ratio'].append(ratio)
+        output['model'].append(model)
+        output['p_value'].append(p_val)
+    pd.DataFrame.from_dict(output).to_csv(dest,sep='\t')
+
+
+calculate_hypotheses_and_export(liver_triplets, liver_expression_df, shared_strains_liver, 'data/liver_causality.tsv')
+calculate_hypotheses_and_export(hypo_triplets, hypothalamus_expression_df, shared_strains_hypo, 'data/hypothalamus_causality.tsv')
