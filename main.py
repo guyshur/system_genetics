@@ -14,6 +14,7 @@ from scipy.stats import gaussian_kde
 ## Local modules
 import preprocessing
 import QTL_analysis
+import utils
 
 np.seterr('raise')
 
@@ -261,24 +262,6 @@ def run_QTL_analysis(genotypes_numeric, phenotypes_df):
 
     return pheno_vs_geno_df
 
-def fdr_analysis(results_df):
-    index_prev_name = results_df.index.name
-    vec = results_df.copy()
-
-    vec.index = vec.index.set_names(['index'])
-    vec = vec.reset_index().melt(id_vars=['index'], var_name='cols', value_name='pval')
-
-    vec_for_bh = vec[~vec.pval.isna()]
-    vec_corrected = vec_for_bh.copy()
-    bools, corrected = bh_procedure(vec_for_bh.pval)
-    vec_corrected.pval = corrected
-
-    # wide=vec.pivot(index='Locus', columns='pheno', values='pval')
-    wide_corrected = vec_corrected.pivot(index='index', columns='cols', values='pval')
-    wide_corrected.index = wide_corrected.index.set_names([index_prev_name])
-
-    return wide_corrected
-
 
 
 def multiple_test_correction(df: pd.DataFrame) -> None:
@@ -442,7 +425,7 @@ if __name__ == '__main__':
 
     # Run QTL analysis
     qtls = QTL_analysis.run_QTL_analysis(genotypes_numeric, phenotypes_df)
-    qtl_fdr = fdr_analysis(qtls.copy())
+    qtl_fdr = utils.fdr_analysis(qtls.copy())
     qtls_significant = qtl_fdr <= 0.05
     reduced_qtl = qtl_fdr[qtls_significant].dropna(axis=1, how='all').dropna(axis=0, how='all')
     num_significant_qtls = reduced_qtl.notna().sum().sum()

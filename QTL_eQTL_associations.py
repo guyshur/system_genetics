@@ -1,30 +1,38 @@
 import os
+from typing import List
+import seaborn as sns
 
 import pandas as pd
-from main import fdr_analysis
+from utils import fdr_analysis
 from main import multiple_test_correction
-from main import  num_significant_genes_per_snp, filter_genes_without_associations
+from main import num_significant_genes_per_snp, filter_genes_without_associations
 import matplotlib.pyplot as plt
+import main
 
-NUM_SIMULATIONS = 100
-NUM_SAMPLES = 10
-def create_eqtl_sampling_based_distribution(qtl, eqtl1, eqtl2):
+NUM_SIMULATIONS = 500
 
-    dist = []
+def create_eqtl_sampling_based_distribution(qtl, eqtl1, eqtl2, NUM_SAMPLES=10):
 
-    for i in range(NUM_SIMULATIONS):
+    sig_eqtl_dist: List = []
+
+    print(f"Running {NUM_SIMULATIONS}")
+    for i in range(1, NUM_SIMULATIONS+1):
         sample_qtls = qtl.sample(n=NUM_SAMPLES).index
+
         _eqtl1 = eqtl1.loc[sample_qtls, :]
         _eqtl2 = eqtl2.loc[sample_qtls, :]
 
         res = (
-            (_eqtl1<= 0.05).sum().sum(),
+            (_eqtl1 <= 0.05).sum().sum(),
             (_eqtl2 <= 0.05).sum().sum()
         )
 
-        dist.append(res)
+        sig_eqtl_dist.append(res)
 
-    return dist
+        if i % 100 == 0:
+            print(f"Simulation {i}/{NUM_SIMULATIONS} completed.")
+
+    return sig_eqtl_dist
 
 
 def get_fdr_corrected_eqtl(hypo_eqtl_raw, liver_eqtl_raw):
@@ -64,35 +72,70 @@ def get_fdr_corrected_qtl(qtl_raw):
     return qtls_fdr
 
 
+def plot_empirical_distributions(dist_df,sig_eqtl_hypo_from_qtl, sig_eqtl_liver_from_qtl, num_snps):
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
+
+    sns.kdeplot(dist_df.liver_eqtl_sig, fill=True, ax=ax1)
+    ax1.axvline(dist_df.liver_eqtl_sig.quantile(.95), color='red', alpha=0.3)
+    ax1.text(sig_eqtl_liver_from_qtl, 0.003, "QTL associated SNP", horizontalalignment='right', size='small', color='black', )
+    ax1.scatter(sig_eqtl_liver_from_qtl, 0.0, marker='o', s=40, edgecolors='black', alpha=.6, linewidths=0.5)
+    ax1.set_xlabel('num of significant eQTLs - Liver data')
+
+    sns.kdeplot(dist_df.hypo_eqtl_sig, fill=True, label='eQTLs distribution', ax=ax2)
+    ax2.axvline(dist_df.hypo_eqtl_sig.quantile(.95), color='red', alpha=0.3, label='.95 percentile')
+    ax2.text(sig_eqtl_hypo_from_qtl, 0.003, "QTL associated SNP", horizontalalignment='right', size='small', color='black')
+    ax2.scatter(sig_eqtl_hypo_from_qtl, 0.0, marker='o', s=40, edgecolors='black',
+                alpha=.6, linewidths=0.5,  label='eQTL based on QTL')
+
+    ax2.set_xlabel('num of significant eQTLs - Hypothalamus data')
+    plt.suptitle(f'Empiricial disribution of the number of significant eQTLs per {num_snps}')
+    plt.legend(loc='upper right')
+    plt.savefig('empirical_eQTLs_density.png')
+
+    plt.legend()
+
+
+
+    pass
+
+
 if __name__ == '__main__':
     hypo_eqtl_raw = pd.read_pickle('/Users/d_private/_git/system_genetics/bin/hypothalamus_eqtl.pkl')
     liver_eqtl_raw = pd.read_pickle('/Users/d_private/_git/system_genetics/bin/liver_eqtl.pkl')
     qtl_raw = pd.read_pickle('/Users/d_private/_git/system_genetics/bin/qtl.pkl')
 
     # Preform fdr on qtl data
-    qtl_fdr = fdr_analysis(qtl_raw)
-    is_significant = qtl_fdr <= 0.05
+    qtl_fdr_only_sig = get_fdr_corrected_qtl(qtl_raw)
+    sig_qtl_snp_names = set(qtl_fdr_only_sig.SNP)
+    num_snps = len(sig_qtl_snp_names)
+    print(sig_qtl_snp_names)
 
-    reduced_qtl = qtl_fdr[is_significant].dropna(axis=1, how='all').dropna(axis=0, how='all')
-    num_sig_qtls = reduced_qtl.notna().sum().sum()
-    sig_qtl_idx = list(reduced_qtl.index)
+    print(f"After filtering non significant QTLs in the FDR-corrected data, {qtl_fdr_only_sig.shape[0]} snp-pehnotypes pairs remain significant.\n"
+          f"Number of SNPs: {len(sig_qtl_snp_names)}")
 
-    print(f"After filtering non significant QTLs in the FDR-corrected data, {num_sig_qtls} snp-pehnotypes remain significant.")
-    print(f"Filtering eqtl fdr corrected data ")
+    print("Preforming fdr on eqtl datasets")
+    hypo_eqtl_fdr, liver_eqtl_fdr = fdr_analysis(hypo_eqtl_raw), fdr_analysis(liver_eqtl_raw)
 
-    hypo_eqtl_fdr, liver_eqtl_fdr = get_fdr_corrected_eqtl(hypo_eqtl_raw, liver_eqtl_raw)
-    qtls_fdr = get_fdr_corrected_qtl(qtl_raw)
+    sig_eqtl_liver_from_qtl = liver_eqtl_fdr.loc[sig_qtl_snp_names,:]
+    sig_eqtl_liver_from_qtl = (sig_eqtl_liver_from_qtl <= 0.05).sum().sum()
+    print(sig_eqtl_liver_from_qtl)
 
-
-
-
-
-
-
+    sig_eqtl_hypo_from_qtl = hypo_eqtl_fdr.loc[sig_qtl_snp_names,:]
+    sig_eqtl_hypo_from_qtl = (sig_eqtl_hypo_from_qtl <= 0.05).sum().sum()
+    print(sig_eqtl_hypo_from_qtl)
 
 
     # Create sampling based distribution of significant eqtls from QTL sub sampling
-    # dist = create_eqtl_sampling_based_distribution(qtl=qtl_fdr, eqtl1=hypo_eqtl_raw, eqtl2=liver_eqtl_raw)
+    dist = create_eqtl_sampling_based_distribution(qtl=qtl_raw, eqtl1=hypo_eqtl_fdr, eqtl2=liver_eqtl_fdr,
+                                                   NUM_SAMPLES=num_snps)
+
+    dist_df = pd.DataFrame(data=dist, columns=['hypo_eqtl_sig', 'liver_eqtl_sig'])
+    dist_df.to_csv('./data/eqtl_dist_dist.csv')
+
+    plot_empirical_distributions(dist_df, sig_eqtl_hypo_from_qtl, sig_eqtl_liver_from_qtl, num_snps)
+
+    # print(dist)
+    print(f"Filtering eqtl fdr corrected data ")
     # print(dist)
 
 

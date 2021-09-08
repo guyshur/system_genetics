@@ -1,6 +1,8 @@
 import pandas as pd
 from scipy.stats import stats
-from main import fdr_analysis
+
+# Local imports
+from utils import fdr_analysis
 
 def local_regress(x, y):
     x = x.dropna()
