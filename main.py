@@ -8,9 +8,13 @@ from matplotlib import pyplot as plt
 from statsmodels.stats.multitest import fdrcorrection as bh_procedure
 import pickle
 import os
-import preprocessing
 from scipy.stats import pearsonr, norm
 from scipy.stats import gaussian_kde
+
+## Local modules
+import preprocessing
+import QTL_analysis
+
 np.seterr('raise')
 
 def generate_triplet_dataframe(snp: str, gene: str, pheno: str, expression_matrix: pd.DataFrame, strains: set) -> pd.DataFrame:
@@ -249,8 +253,10 @@ def run_QTL_analysis(genotypes_numeric, phenotypes_df):
         common = genotypes_homozygous.columns.intersection(y.index)
         y = y[common]
         X = genotypes_homozygous[common]
+
         reg_models = X.apply(lambda x: stats.linregress(x, y), axis=1)
         pvals = reg_models.apply(lambda model: model.pvalue)
+
         pheno_vs_geno_df[pheno.name] = pvals
 
     return pheno_vs_geno_df
@@ -270,6 +276,7 @@ def fdr_analysis(results_df):
     # wide=vec.pivot(index='Locus', columns='pheno', values='pval')
     wide_corrected = vec_corrected.pivot(index='index', columns='cols', values='pval')
     wide_corrected.index = wide_corrected.index.set_names([index_prev_name])
+
     return wide_corrected
 
 
@@ -433,63 +440,16 @@ if __name__ == '__main__':
     genotypes_df.to_csv('./data/genotypes_preproc_df.csv')
     genotypes_numeric.to_csv('./data/genotypes_preproc_numeric_df.csv')
 
-    path = 'bin/qtl.pkl'
-    if os.path.isfile(path):
-        with open(path, 'rb') as f:
-            qtls = pickle.load(f)
-    else:
-        common_geno_pheno = [x for x in phenotypes_df.columns if x in genotypes_numeric.columns]
-        shared_geno = genotypes_numeric.loc[:, common_geno_pheno]
-        shared_pheno = phenotypes_df.loc[:, common_geno_pheno]
-        assert shared_geno.columns.tolist() == shared_pheno.columns.tolist()
-        qtls = pd.DataFrame(index=shared_geno.index.tolist(), columns=shared_pheno.index.tolist(), dtype=float,
-                            data=np.zeros((
-                                len(shared_geno.index), len(shared_pheno.index)
-                            )))
-        assert all([isinstance(x, str) for x in shared_geno.index.tolist()])
-        assert all([isinstance(x, str) for x in shared_pheno.index.tolist()])
-        to_drop = set()
-        for snp, genotypes in shared_geno.iterrows():
-            for phenotype, phenotype_values in shared_pheno.iterrows():
-                mask = (phenotype_values.notna()) & (genotypes != 1)
-                assert phenotype_values.index.tolist() == genotypes.index.tolist()
-                phenotypes_cp = phenotype_values.copy()[mask]
-                genotypes_cp = genotypes.copy()[mask]
-                assert phenotypes_cp.index.tolist() == genotypes_cp.index.tolist()
-                try:
-                    p_val = linregress(genotypes_cp, phenotypes_cp)[3]
-                    try:
-                        assert 0 <= p_val <= 1
-                    except AssertionError:
-                        print(p_val)
-                        raise AssertionError
-                    assert isinstance(p_val, float)
-                    qtls.at[snp, phenotype] = p_val
-                except FloatingPointError:  # at least one of the groups (B or D) is empty, can't do regression
-                    to_drop.add(phenotype)
+    # Run QTL analysis
+    qtls = QTL_analysis.run_QTL_analysis(genotypes_numeric, phenotypes_df)
+    qtl_fdr = fdr_analysis(qtls.copy())
+    qtls_significant = qtl_fdr <= 0.05
+    reduced_qtl = qtl_fdr[qtls_significant].dropna(axis=1, how='all').dropna(axis=0, how='all')
+    num_significant_qtls = reduced_qtl.notna().sum().sum()
+    print(f"After filtering non significant QTLs in the FDR-corrected data, {num_significant_qtls} snp-traits remain significant.")
 
-        qtls.drop(columns=list(to_drop), inplace=True)
-        assert not any(qtls.isna().values.flatten().tolist())
-        assert all([isinstance(float(x), float) for x in qtls.values.flatten().tolist()])
-        with open(path, 'wb+') as f:
-            pickle.dump(qtls, f)
-    for x in qtls.index:
-        for y in qtls.columns:
-            try:
-                assert isinstance(qtls.at[x, y], float)
-            except AssertionError:
-                print(x, y)
-                print(qtls.at[x, y])
-                exit()
 
-    multiple_test_correction(qtls)
-    qtls_significant: pd.DataFrame = qtls <= 0.05
-    print('number of QTLs: {}'.format(qtls_significant.stack().value_counts()[True]))
-    # QTL_results_not_corrected_df = run_QTL_analysis(genotypes_numeric, phenotypes_df)
-    # QTL_results_not_corrected_df.to_csv('./data/QTL_results_not_corrected_df.csv')
-    # QTL_results_corrected_df = fdr_analysis(QTL_results_not_corrected_df)
-    # QTL_results_corrected_df.to_csv('./data/QTL_results_corrected_df.csv')
-    p_vals = qtls.values.flatten()
+    p_vals = qtl_fdr.values.flatten()
     density = gaussian_kde(p_vals)
     xs = np.linspace(0, 1, 2000)
     density.covariance_factor = lambda: .25
@@ -500,6 +460,8 @@ if __name__ == '__main__':
     plt.ylabel('association count density')
     plt.savefig('qtl_p_density.png')
     plt.clf()
+
+
     liver_eqtl_results = linear_regression(genotypes_numeric, liver_expression_df,
                                            genotype_liver_strains, 'bin/liver_eqtl.pkl')
 
@@ -514,7 +476,7 @@ if __name__ == '__main__':
     print('number of hypothalamus eQTLs: {}'.format(hypothalamus_significant.stack().value_counts()[True]))
     filter_genes_without_associations(hypothalamus_eqtl_results, hypothalamus_significant)
 
-    qtls_to_csv(qtls, 'data/qtls.csv')
+    qtls_to_csv(qtl_fdr, 'data/qtls.csv')
     eqtls_to_csv(liver_eqtl_results, 'data/liver_eqtls.csv')
     eqtls_to_csv(hypothalamus_eqtl_results, 'data/hypothalamus_eqtls.csv')
 
@@ -581,3 +543,58 @@ if __name__ == '__main__':
 
     calculate_hypotheses_and_export(liver_triplets, liver_expression_df, shared_strains_liver, 'data/liver_causality.csv')
     calculate_hypotheses_and_export(hypo_triplets, hypothalamus_expression_df, shared_strains_hypo, 'data/hypothalamus_causality.csv')
+
+    '''
+    path = 'bin/qtl.pkl'
+    if os.path.isfile(path):
+        with open(path, 'rb') as f:
+            qtls = pickle.load(f)
+    else:
+        common_geno_pheno = [x for x in phenotypes_df.columns if x in genotypes_numeric.columns]
+        shared_geno = genotypes_numeric.loc[:, common_geno_pheno]
+        shared_pheno = phenotypes_df.loc[:, common_geno_pheno]
+        assert shared_geno.columns.tolist() == shared_pheno.columns.tolist()
+        qtls = pd.DataFrame(index=shared_geno.index.tolist(), columns=shared_pheno.index.tolist(), dtype=float,
+                            data=np.zeros((
+                                len(shared_geno.index), len(shared_pheno.index)
+                            )))
+        assert all([isinstance(x, str) for x in shared_geno.index.tolist()])
+        assert all([isinstance(x, str) for x in shared_pheno.index.tolist()])
+        to_drop = set()
+        for snp, genotypes in shared_geno.iterrows():
+            for phenotype, phenotype_values in shared_pheno.iterrows():
+                mask = (phenotype_values.notna()) & (genotypes != 1)
+                assert phenotype_values.index.tolist() == genotypes.index.tolist()
+                phenotypes_cp = phenotype_values.copy()[mask]
+                genotypes_cp = genotypes.copy()[mask]
+                assert phenotypes_cp.index.tolist() == genotypes_cp.index.tolist()
+                try:
+                    p_val = linregress(genotypes_cp, phenotypes_cp)[3]
+                    try:
+                        assert 0 <= p_val <= 1
+                    except AssertionError:
+                        print(p_val)
+                        raise AssertionError
+                    assert isinstance(p_val, float)
+                    qtls.at[snp, phenotype] = p_val
+                except FloatingPointError:  # at least one of the groups (B or D) is empty, can't do regression
+                    to_drop.add(phenotype)
+
+        qtls.drop(columns=list(to_drop), inplace=True)
+        assert not any(qtls.isna().values.flatten().tolist())
+        assert all([isinstance(float(x), float) for x in qtls.values.flatten().tolist()])
+        with open(path, 'wb+') as f:
+            pickle.dump(qtls, f)
+    for x in qtls.index:
+        for y in qtls.columns:
+            try:
+                assert isinstance(qtls.at[x, y], float)
+            except AssertionError:
+                print(x, y)
+                print(qtls.at[x, y])
+                exit()
+
+    multiple_test_correction(qtls)
+    qtls_significant: pd.DataFrame = qtls <= 0.05
+    print('number of QTLs: {}'.format(qtls_significant.stack().value_counts()[True]))
+    '''
