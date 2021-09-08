@@ -1,3 +1,5 @@
+import sys
+
 import pandas as pd
 import numpy as np
 
@@ -196,7 +198,11 @@ def get_likelihood_ratio_and_permutation_p_value(triplet: tuple, expression_data
 
 def calculate_hypotheses_and_export(triplets, expression_dataframe, strains, dest):
     output = {'SNP': [], 'gene': [], 'phenotype': [], 'likelihood_ratio':[], 'model': [], 'p_value': []}
+    total = len(triplets)
+    i = 0
     for triplet in triplets:
+        print('done {} / {} triplets'.format(i, total))
+        i += 1
         output['SNP'].append(triplet[0])
         output['gene'].append(triplet[1])
         output['phenotype'].append(triplet[2])
@@ -204,6 +210,7 @@ def calculate_hypotheses_and_export(triplets, expression_dataframe, strains, des
         output['likelihood_ratio'].append(ratio)
         output['model'].append(model)
         output['p_value'].append(p_val)
+    print('exporting to csv..')
     pd.DataFrame.from_dict(output).to_csv(dest)
 
 
@@ -232,7 +239,6 @@ def eqtls_to_csv(eqtls: pd.DataFrame, dest):
 def run_QTL_analysis(genotypes_numeric, phenotypes_df):
     geno_df = genotypes_numeric.copy()
     pheno_df = phenotypes_df.copy()
-
     # Filter out hetrozygous samples and encode genotypes as either 1 or 2.
     mask = geno_df != 1
     genotypes_homozygous = geno_df[mask]
