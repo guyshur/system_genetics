@@ -1,4 +1,4 @@
-import sys
+import math
 
 import pandas as pd
 import numpy as np
@@ -8,15 +8,48 @@ from matplotlib import pyplot as plt
 from statsmodels.stats.multitest import fdrcorrection as bh_procedure
 import pickle
 import os
-import preprocessing
-from scipy.stats import pearsonr, norm
+from scipy.stats import pearsonr
 from scipy.stats import gaussian_kde
+
+## Local modules
+import preprocessing
+import QTL_analysis
+import utils
+
 np.seterr('raise')
 
-def generate_triplet_dataframe(snp: str, gene: str, pheno: str, expression_matrix: pd.DataFrame, strains: set) -> pd.DataFrame:
-    snp_col = genotypes_numeric.loc[snp, strains]
-    expression_col = expression_matrix.loc[gene, strains]
-    pheno_col = phenotypes_df.loc[pheno, strains]
+
+def generate_random_triplets(geno_df, expression_df, pheno_df, number_of_triplets=30):
+    possible_snps = geno_df.index.tolist()
+    possible_genes = expression_df.index.tolist()
+    possible_phenos = pheno_df.index.tolist()
+    snps_for_triplets = np.random.choice(possible_snps, size=number_of_triplets, replace=True)
+    genes_for_triplets = np.random.choice(possible_genes, size=number_of_triplets, replace=True)
+    phenos_for_triplets = np.random.choice(possible_phenos, size=number_of_triplets, replace=True)
+    while True:
+        valid = True
+        for snp in snps_for_triplets:
+            gen_data = geno_df.loc[snp,:].dropna().tolist()
+            if all([x == 2 for x in gen_data]) or all ([x == 0 for x in gen_data]):
+                valid = False
+                break
+        print(valid)
+        if valid:
+            break
+        snps_for_triplets = np.random.choice(possible_snps, size=number_of_triplets, replace=True)
+    return list(zip(snps_for_triplets, genes_for_triplets, phenos_for_triplets))
+
+
+
+def norm_pdf(mu, sigma):
+    return lambda x: (math.exp(-0.5*(((x-mu)/sigma)**2)))/(sigma*math.sqrt(2*math.pi))
+
+
+def generate_triplet_dataframe(triplet_snp: str, triplet_gene: str, triplet_pheno: str,
+                               expression_matrix: pd.DataFrame, strains: set) -> pd.DataFrame:
+    snp_col = genotypes_numeric.loc[triplet_snp, strains]
+    expression_col = expression_matrix.loc[triplet_gene, strains]
+    pheno_col = phenotypes_df.loc[triplet_pheno, strains]
     df = pd.DataFrame(index=strains)
     df['genotype'] = snp_col
     df['expression'] = expression_col
@@ -39,7 +72,7 @@ def generate_triplet_dataframe(snp: str, gene: str, pheno: str, expression_matri
     df['m1_likelihood'] = np.nan
     df['m2_likelihood'] = np.nan
     df['m3_likelihood'] = np.nan
-    return df
+    return df.sort_values(by="genotype")
 
 
 # calculating parameters
@@ -67,11 +100,7 @@ def get_C_variable_params_given_L(triplet_dataframe: pd.DataFrame):
 
 def get_rho(triplet_dataframe: pd.DataFrame):
     pheno_data = triplet_dataframe['phenotype'].values
-    mask = ~np.isnan(pheno_data)
-    pheno_data = pheno_data[mask]
-    if len(pheno_data) < 3:
-        return None
-    expression_data = triplet_dataframe['expression'].values[mask]
+    expression_data = triplet_dataframe['expression'].values
     rho, p = pearsonr(expression_data, pheno_data)
     return rho
 
@@ -102,22 +131,22 @@ def get_R_variable_params_given_C(triplet_dataframe: pd.DataFrame):
 
 def get_p_R_given_L(triplet_dataframe: pd.DataFrame):
     triplet_dataframe['p_R|L'] = triplet_dataframe.apply(
-        lambda row: norm(row['mu_R|L'], row['sigma_R|L']).pdf(row['expression']), axis=1)
+        lambda row: norm_pdf(row['mu_R|L'], row['sigma_R|L'])(row['expression']), axis=1)
 
 
 def get_p_C_given_L(triplet_dataframe: pd.DataFrame):
     triplet_dataframe['p_C|L'] = triplet_dataframe.apply(
-        lambda row: norm(row['mu_C|L'], row['sigma_C|L']).pdf(row['phenotype']), axis=1)
+        lambda row: norm_pdf(row['mu_C|L'], row['sigma_C|L'])(row['phenotype']), axis=1)
 
 
 def get_p_R_given_C(triplet_dataframe: pd.DataFrame):
     triplet_dataframe['p_R|C'] = triplet_dataframe.apply(
-        lambda row: norm(row['mu_R|C'], row['sigma_R|C']).pdf(row['expression']), axis=1)
+        lambda row: norm_pdf(row['mu_R|C'], row['sigma_R|C'])(row['expression']), axis=1)
 
 
 def get_p_C_given_R(triplet_dataframe: pd.DataFrame):
     triplet_dataframe['p_C|R'] = triplet_dataframe.apply(
-        lambda row: norm(row['mu_C|R'], row['sigma_C|R']).pdf(row['phenotype']), axis=1)
+        lambda row: norm_pdf(row['mu_C|R'], row['sigma_C|R'])(row['phenotype']), axis=1)
 
 
 def get_likelihoods(triplet_dataframe: pd.DataFrame):
@@ -127,6 +156,7 @@ def get_likelihoods(triplet_dataframe: pd.DataFrame):
         lambda row: 0.5 * row['p_C|L'] * row['p_R|C'], axis=1)
     triplet_dataframe['m3_likelihood'] = triplet_dataframe.apply(
         lambda row: 0.5 * row['p_R|L'] * row['p_C|L'], axis=1)
+
 
 def get_likelihood_ratio(triplet_dataframe: pd.DataFrame):
     complete_likelihoods = [np.prod(triplet_dataframe['m1_likelihood']),
@@ -149,6 +179,7 @@ def _calculate_hypothesis_for_table(triplet_dataframe:pd.DataFrame):
     get_p_R_given_C(triplet_dataframe)
     get_p_C_given_R(triplet_dataframe)
     get_likelihoods(triplet_dataframe)
+    triplet_dataframe.to_csv('triplet.tsv',sep='\t')
     return get_likelihood_ratio(triplet_dataframe)
 
 
@@ -160,11 +191,12 @@ def calculate_hypothesis_for_triplet(triplet: tuple, expression_dataframe: pd.Da
     :param strains: the BXD strains that will be used to the calculations
     :return: tuple of (the likelihood ratio, number of the selected model [1,2,3])
     """
-    snp = triplet[0]
-    gene = triplet[1]
-    pheno = triplet[2]
+    triplet_snp = triplet[0]
+    triplet_gene = triplet[1]
+    triplet_pheno = triplet[2]
     triplet_table: pd.DataFrame = generate_triplet_dataframe(
-        snp=snp,gene=gene,pheno=pheno,expression_matrix=expression_dataframe,strains=strains)
+        triplet_snp=triplet_snp,triplet_gene=triplet_gene,triplet_pheno=triplet_pheno,
+        expression_matrix=expression_dataframe,strains=strains)
     return _calculate_hypothesis_for_table(triplet_dataframe=triplet_table)
 
 
@@ -176,27 +208,29 @@ def get_likelihood_ratio_and_permutation_p_value(triplet: tuple, expression_data
     :param strains: the BXD strains that will be used to the calculations
     :return: tuple of (the likelihood ratio, number of the selected model [1,2,3], p_value from permutation)
     """
-    snp = triplet[0]
-    gene = triplet[1]
-    pheno = triplet[2]
+    triplet_snp = triplet[0]
+    triplet_gene = triplet[1]
+    triplet_pheno = triplet[2]
     triplet_table: pd.DataFrame = generate_triplet_dataframe(
-        snp=snp,gene=gene,pheno=pheno,expression_matrix=expression_dataframe,strains=strains)
+        triplet_snp=triplet_snp, triplet_gene=triplet_gene, triplet_pheno=triplet_pheno,
+        expression_matrix=expression_dataframe, strains=strains)
     ratio, selected_model = _calculate_hypothesis_for_table(triplet_table)
     ratios = []
     for _ in range(100):
         triplet_table: pd.DataFrame = generate_triplet_dataframe(
-            snp=snp, gene=gene, pheno=pheno, expression_matrix=expression_dataframe, strains=strains)
+            triplet_snp=triplet_snp, triplet_gene=triplet_gene, triplet_pheno=triplet_pheno,
+            expression_matrix=expression_dataframe, strains=strains)
         expression = triplet_table['expression'].values
         np.random.shuffle(expression)
         triplet_table['expression'] = expression
-        phenotype = triplet_table['phenotype'].values
-        np.random.shuffle(phenotype)
-        triplet_table['phenotype'] = phenotype
+        phenotype_vec = triplet_table['phenotype'].values
+        np.random.shuffle(phenotype_vec)
+        triplet_table['phenotype'] = phenotype_vec
         ratios.append(_calculate_hypothesis_for_table(triplet_table)[0])
     return ratio, selected_model, len([x for x in ratios if x >= ratio])/100
 
 
-def calculate_hypotheses_and_export(triplets, expression_dataframe, strains, dest):
+def calculate_hypotheses_and_export(triplets, expression_dataframe, strains, dest, organ):
     output = {'SNP': [], 'gene': [], 'phenotype': [], 'likelihood_ratio':[], 'model': [], 'p_value': []}
     total = len(triplets)
     i = 0
@@ -206,10 +240,41 @@ def calculate_hypotheses_and_export(triplets, expression_dataframe, strains, des
         output['SNP'].append(triplet[0])
         output['gene'].append(triplet[1])
         output['phenotype'].append(triplet[2])
-        ratio, model, p_val = get_likelihood_ratio_and_permutation_p_value(triplet, expression_dataframe, strains)
+        ratio, model, model_p_val = get_likelihood_ratio_and_permutation_p_value(triplet, expression_dataframe, strains)
         output['likelihood_ratio'].append(ratio)
         output['model'].append(model)
-        output['p_value'].append(p_val)
+        output['p_value'].append(model_p_val)
+    output['p_value'] = bh_procedure(output['p_value'])[1]
+    print('exporting to csv..')
+    density = gaussian_kde(output['p_value'])
+    xs = np.linspace(0, 1, 2000)
+    density.covariance_factor = lambda: .25
+    density._compute_covariance()
+    ax = plt.gca()
+    ax.axes.yaxis.set_visible(False)
+    plt.plot(xs, density(xs))
+    plt.title('Causality analysis model selection\np-value distribution for significant triplets\n{} genes'.format(organ))
+    plt.xlabel('p value')
+    plt.savefig('{}_causality_p_value_distribution.png'.format(organ))
+    plt.clf()
+    pd.DataFrame.from_dict(output).to_csv(dest)
+
+
+def calculate_mock_hypotheses_and_export(triplets, expression_dataframe, strains, dest):
+    output = {'SNP': [], 'gene': [], 'phenotype': [], 'likelihood_ratio':[], 'model': [], 'p_value': []}
+    total = len(triplets)
+    i = 0
+    for triplet in triplets:
+        print('done {} / {} triplets'.format(i, total))
+        i += 1
+        output['SNP'].append(triplet[0])
+        output['gene'].append(triplet[1])
+        output['phenotype'].append(triplet[2])
+        ratio, model, model_p_val = get_likelihood_ratio_and_permutation_p_value(triplet, expression_dataframe, strains)
+        output['likelihood_ratio'].append(ratio)
+        output['model'].append(model)
+        output['p_value'].append(model_p_val)
+    output['p_value'] = bh_procedure(output['p_value'])[1]
     print('exporting to csv..')
     pd.DataFrame.from_dict(output).to_csv(dest)
 
@@ -239,7 +304,7 @@ def eqtls_to_csv(eqtls: pd.DataFrame, dest):
 def run_QTL_analysis(genotypes_numeric, phenotypes_df):
     geno_df = genotypes_numeric.copy()
     pheno_df = phenotypes_df.copy()
-    # Filter out hetrozygous samples and encode genotypes as either 1 or 2.
+    #Filter out hetrozygous samples and encode genotypes as either 1 or 2.
     mask = geno_df != 1
     genotypes_homozygous = geno_df[mask]
     pheno_vs_geno_df = pd.DataFrame(index=genotypes_homozygous.index, columns=pheno_df.index)
@@ -400,7 +465,10 @@ if __name__ == '__main__':
     inplace=True)
     phenotypes_df = phenotypes_df.loc[~phenotypes_df.index.duplicated(),:]
     phenotypes = [x for x in phenotypes_df.index if 'blood' in x.lower() and 'male' in x.lower() and 'female' not in x.lower()]
+    for pheno in phenotypes:
+        print(pheno)
     phenotypes_df = phenotypes_df.loc[phenotypes,:]
+
     print('num phenotypes: {}'.format(len(phenotypes)))
 
     phenotypes_df.to_csv('data/phenotypes_filtered_df.csv')
@@ -433,71 +501,25 @@ if __name__ == '__main__':
     genotypes_df.to_csv('./data/genotypes_preproc_df.csv')
     genotypes_numeric.to_csv('./data/genotypes_preproc_numeric_df.csv')
 
-    path = 'bin/qtl.pkl'
-    if os.path.isfile(path):
-        with open(path, 'rb') as f:
-            qtls = pickle.load(f)
-    else:
-        common_geno_pheno = [x for x in phenotypes_df.columns if x in genotypes_numeric.columns]
-        shared_geno = genotypes_numeric.loc[:, common_geno_pheno]
-        shared_pheno = phenotypes_df.loc[:, common_geno_pheno]
-        assert shared_geno.columns.tolist() == shared_pheno.columns.tolist()
-        qtls = pd.DataFrame(index=shared_geno.index.tolist(), columns=shared_pheno.index.tolist(), dtype=float,
-                            data=np.zeros((
-                                len(shared_geno.index), len(shared_pheno.index)
-                            )))
-        assert all([isinstance(x, str) for x in shared_geno.index.tolist()])
-        assert all([isinstance(x, str) for x in shared_pheno.index.tolist()])
-        to_drop = set()
-        for snp, genotypes in shared_geno.iterrows():
-            for phenotype, phenotype_values in shared_pheno.iterrows():
-                mask = (phenotype_values.notna()) & (genotypes != 1)
-                assert phenotype_values.index.tolist() == genotypes.index.tolist()
-                phenotypes_cp = phenotype_values.copy()[mask]
-                genotypes_cp = genotypes.copy()[mask]
-                assert phenotypes_cp.index.tolist() == genotypes_cp.index.tolist()
-                try:
-                    p_val = linregress(genotypes_cp, phenotypes_cp)[3]
-                    try:
-                        assert 0 <= p_val <= 1
-                    except AssertionError:
-                        print(p_val)
-                        raise AssertionError
-                    assert isinstance(p_val, float)
-                    qtls.at[snp, phenotype] = p_val
-                except FloatingPointError:  # at least one of the groups (B or D) is empty, can't do regression
-                    to_drop.add(phenotype)
-
-        qtls.drop(columns=list(to_drop), inplace=True)
-        assert not any(qtls.isna().values.flatten().tolist())
-        assert all([isinstance(float(x), float) for x in qtls.values.flatten().tolist()])
-        with open(path, 'wb+') as f:
-            pickle.dump(qtls, f)
-    for x in qtls.index:
-        for y in qtls.columns:
-            try:
-                assert isinstance(qtls.at[x, y], float)
-            except AssertionError:
-                print(x, y)
-                print(qtls.at[x, y])
-                exit()
-
-    multiple_test_correction(qtls)
-    qtls_significant: pd.DataFrame = qtls <= 0.05
-    print('number of QTLs: {}'.format(qtls_significant.stack().value_counts()[True]))
-    # QTL_results_not_corrected_df = run_QTL_analysis(genotypes_numeric, phenotypes_df)
-    # QTL_results_not_corrected_df.to_csv('./data/QTL_results_not_corrected_df.csv')
-    # QTL_results_corrected_df = fdr_analysis(QTL_results_not_corrected_df)
-    # QTL_results_corrected_df.to_csv('./data/QTL_results_corrected_df.csv')
+    # Run QTL analysis
+    qtls = QTL_analysis.run_QTL_analysis(genotypes_numeric, phenotypes_df)
+    qtl_fdr = utils.fdr_analysis(qtls.copy())
+    qtls_significant = qtl_fdr <= 0.05
+    reduced_qtl = qtl_fdr[qtls_significant].dropna(axis=1, how='all').dropna(axis=0, how='all')
+    num_significant_qtls = reduced_qtl.notna().sum().sum()
+    print(
+        f"After filtering non significant QTLs in the FDR-corrected data, {num_significant_qtls} snp-traits remain significant.")
     p_vals = qtls.values.flatten()
     density = gaussian_kde(p_vals)
     xs = np.linspace(0, 1, 2000)
     density.covariance_factor = lambda: .25
     density._compute_covariance()
+    ax = plt.gca()
+    ax.axes.yaxis.set_visible(False)
     plt.plot(xs, density(xs))
     plt.title('QTL analysis p value density')
     plt.xlabel('p value')
-    plt.ylabel('association count density')
+
     plt.savefig('qtl_p_density.png')
     plt.clf()
     liver_eqtl_results = linear_regression(genotypes_numeric, liver_expression_df,
@@ -506,17 +528,22 @@ if __name__ == '__main__':
     multiple_test_correction(liver_eqtl_results)
     liver_significant: pd.DataFrame = liver_eqtl_results <= 0.05
     print('number of liver eQTLs: {}'.format(liver_significant.stack().value_counts()[True]))
+    print('liver eqtl candidates: {}'.format(len(liver_eqtl_results.index)*len(liver_eqtl_results.columns)))
     filter_genes_without_associations(liver_eqtl_results, liver_significant)
     hypothalamus_eqtl_results = linear_regression(genotypes_numeric, hypothalamus_expression_df,
                                                   genotype_hypothalamus_strains, 'bin/hypothalamus_eqtl.pkl')
     multiple_test_correction(hypothalamus_eqtl_results)
     hypothalamus_significant: pd.DataFrame = hypothalamus_eqtl_results <= 0.05
     print('number of hypothalamus eQTLs: {}'.format(hypothalamus_significant.stack().value_counts()[True]))
+    print('hypothalamus eqtl candidates: {}'.format(len(hypothalamus_eqtl_results.index)*len(hypothalamus_eqtl_results.columns)))
+
     filter_genes_without_associations(hypothalamus_eqtl_results, hypothalamus_significant)
 
     qtls_to_csv(qtls, 'data/qtls.csv')
     eqtls_to_csv(liver_eqtl_results, 'data/liver_eqtls.csv')
     eqtls_to_csv(hypothalamus_eqtl_results, 'data/hypothalamus_eqtls.csv')
+    print('liver eqtl candidates: {}'.format(len(liver_eqtl_results.index)*len(liver_eqtl_results.columns)))
+    print('hypothalamus eqtl candidates: {}'.format(len(hypothalamus_eqtl_results.index)*len(hypothalamus_eqtl_results.columns)))
 
     p_vals = liver_eqtl_results.values.flatten()
     density = gaussian_kde(p_vals)
@@ -526,11 +553,12 @@ if __name__ == '__main__':
     density = gaussian_kde(p_vals)
     density._compute_covariance()
     plt.plot(xs, density(xs), label='hypothalamus eQTL p value density')
+    plt.legend()
     plt.title('eQTL analysis p value density')
     plt.xlabel('p value')
-    plt.ylabel('association count density')
+    ax = plt.gca()
+    ax.axes.yaxis.set_visible(False)
     plt.savefig('eQTL_p_density.png')
-    plt.legend()
     plt.clf()
 
     num_of_significant_genes = num_significant_genes_per_snp(liver_eqtl_results)
@@ -538,11 +566,12 @@ if __name__ == '__main__':
     num_of_significant_genes = num_significant_genes_per_snp(hypothalamus_eqtl_results)
     plt.hist(num_of_significant_genes,bins=30,label='hypothalamus eQTL distribution',alpha=0.5)
     plt.legend()
-    plt.title('Distribution of eQTLs')
+    plt.title('number of genes associated to each SNP')
     plt.xlabel('number of SNPs')
-    plt.ylabel('number of significantly associated genes')
+    plt.ylabel('number of genes')
     plt.savefig('eQTL_dist.png')
     plt.clf()
+
     liver_triplets = set()
     print('Finding cis significant qtl and liver eqtl')
     for snp in qtls_significant.index:
@@ -569,7 +598,7 @@ if __name__ == '__main__':
     print('number of pairs of cis significant qtls and liver eQTLs: {}'.format(len(hypo_triplets)))
     liver_triplets = list(liver_triplets)
     hypo_triplets = list(hypo_triplets)
-
+    print('doin hypothesis')
     # shared strains only
     shared_strains_liver = set(genotypes_numeric.columns) & set(phenotypes_df.columns) & set(liver_expression_df.columns)
     shared_strains_hypo = set(genotypes_numeric.columns) & set(phenotypes_df.columns) & set(
@@ -579,5 +608,12 @@ if __name__ == '__main__':
     liver_expression_df = liver_expression_df[shared_strains_liver]
     hypothalamus_expression_df = hypothalamus_expression_df[shared_strains_hypo]
 
-    calculate_hypotheses_and_export(liver_triplets, liver_expression_df, shared_strains_liver, 'data/liver_causality.csv')
-    calculate_hypotheses_and_export(hypo_triplets, hypothalamus_expression_df, shared_strains_hypo, 'data/hypothalamus_causality.csv')
+
+
+    calculate_hypotheses_and_export(hypo_triplets, hypothalamus_expression_df, shared_strains_hypo, 'data/hypothalamus_causality.csv', 'hypothalamus')
+    calculate_hypotheses_and_export(liver_triplets, liver_expression_df, shared_strains_liver, 'data/mock_liver_causality.csv', 'mock_liver')
+
+    # generate random triplets to test pvaluue distribution
+    # liver_triplets = generate_random_triplets(genotypes_df, liver_expression_df, phenotypes_df, 50)
+    # calculate_hypotheses_and_export(liver_triplets, liver_expression_df, shared_strains_liver,
+    #                                 'data/mock_liver_causality.csv', 'mock_liver')
