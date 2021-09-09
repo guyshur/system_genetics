@@ -314,28 +314,13 @@ def run_QTL_analysis(genotypes_numeric, phenotypes_df):
         common = genotypes_homozygous.columns.intersection(y.index)
         y = y[common]
         X = genotypes_homozygous[common]
+
         reg_models = X.apply(lambda x: stats.linregress(x, y), axis=1)
         pvals = reg_models.apply(lambda model: model.pvalue)
+
         pheno_vs_geno_df[pheno.name] = pvals
 
     return pheno_vs_geno_df
-
-def fdr_analysis(results_df):
-    index_prev_name = results_df.index.name
-    vec = results_df.copy()
-
-    vec.index = vec.index.set_names(['index'])
-    vec = vec.reset_index().melt(id_vars=['index'], var_name='cols', value_name='pval')
-
-    vec_for_bh = vec[~vec.pval.isna()]
-    vec_corrected = vec_for_bh.copy()
-    bools, corrected = bh_procedure(vec_for_bh.pval)
-    vec_corrected.pval = corrected
-
-    # wide=vec.pivot(index='Locus', columns='pheno', values='pval')
-    wide_corrected = vec_corrected.pivot(index='index', columns='cols', values='pval')
-    wide_corrected.index = wide_corrected.index.set_names([index_prev_name])
-    return wide_corrected
 
 
 
@@ -507,9 +492,8 @@ if __name__ == '__main__':
     qtls_significant = qtl_fdr <= 0.05
     reduced_qtl = qtl_fdr[qtls_significant].dropna(axis=1, how='all').dropna(axis=0, how='all')
     num_significant_qtls = reduced_qtl.notna().sum().sum()
-    print(
-        f"After filtering non significant QTLs in the FDR-corrected data, {num_significant_qtls} snp-traits remain significant.")
-    p_vals = qtls.values.flatten()
+    print(f"After filtering non significant QTLs in the FDR-corrected data, {num_significant_qtls} snp-traits remain significant.")
+    p_vals = qtl_fdr.values.flatten()
     density = gaussian_kde(p_vals)
     xs = np.linspace(0, 1, 2000)
     density.covariance_factor = lambda: .25
@@ -522,6 +506,8 @@ if __name__ == '__main__':
 
     plt.savefig('qtl_p_density.png')
     plt.clf()
+
+
     liver_eqtl_results = linear_regression(genotypes_numeric, liver_expression_df,
                                            genotype_liver_strains, 'bin/liver_eqtl.pkl')
 
@@ -539,7 +525,7 @@ if __name__ == '__main__':
 
     filter_genes_without_associations(hypothalamus_eqtl_results, hypothalamus_significant)
 
-    qtls_to_csv(qtls, 'data/qtls.csv')
+    qtls_to_csv(qtl_fdr, 'data/qtls.csv')
     eqtls_to_csv(liver_eqtl_results, 'data/liver_eqtls.csv')
     eqtls_to_csv(hypothalamus_eqtl_results, 'data/hypothalamus_eqtls.csv')
     print('liver eqtl candidates: {}'.format(len(liver_eqtl_results.index)*len(liver_eqtl_results.columns)))
@@ -607,9 +593,6 @@ if __name__ == '__main__':
     phenotypes_df = phenotypes_df[shared_strains_liver | shared_strains_hypo]
     liver_expression_df = liver_expression_df[shared_strains_liver]
     hypothalamus_expression_df = hypothalamus_expression_df[shared_strains_hypo]
-
-
-
     calculate_hypotheses_and_export(hypo_triplets, hypothalamus_expression_df, shared_strains_hypo, 'data/hypothalamus_causality.csv', 'hypothalamus')
     calculate_hypotheses_and_export(liver_triplets, liver_expression_df, shared_strains_liver, 'data/mock_liver_causality.csv', 'mock_liver')
 
@@ -617,3 +600,4 @@ if __name__ == '__main__':
     # liver_triplets = generate_random_triplets(genotypes_df, liver_expression_df, phenotypes_df, 50)
     # calculate_hypotheses_and_export(liver_triplets, liver_expression_df, shared_strains_liver,
     #                                 'data/mock_liver_causality.csv', 'mock_liver')
+
