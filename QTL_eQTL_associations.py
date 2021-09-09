@@ -3,11 +3,8 @@ from typing import List
 import seaborn as sns
 
 import pandas as pd
-from utils import fdr_analysis
-from main import multiple_test_correction
-from main import num_significant_genes_per_snp, filter_genes_without_associations
+from utils import fdr_analysis, get_fdr_corrected_qtl, get_fdr_corrected_eqtl
 import matplotlib.pyplot as plt
-import main
 
 NUM_SIMULATIONS = 500
 
@@ -37,44 +34,6 @@ def create_eqtl_sampling_based_distribution(qtl, eqtl1, eqtl2, NUM_SAMPLES=10, R
             print(f"Simulation {i}/{NUM_SIMULATIONS} completed.")
 
     return sig_eqtl_dist
-
-
-def get_fdr_corrected_eqtl(hypo_eqtl_raw, liver_eqtl_raw):
-
-    path = './data/hypothalamus_eqtls_fdr.csv'
-    if os.path.isfile(path):
-        print("Reading existing hypo eqtl fdr file")
-        hypo_eqtl_fdr = pd.read_csv(path, index_col=0)
-    else:
-        print("hypo eqtl fdr corrected file does not exist, running fdr")
-        hypo_eqtl_fdr = fdr_analysis(hypo_eqtl_raw)
-        hypo_eqtl_fdr.to_csv(path)
-
-    path = './data/liver_eqtls_fdr.csv'
-    if os.path.isfile(path):
-        print("Reading existing liver eqtl fdr file")
-        liver_eqtl_fdr = pd.read_csv(path, index_col=0)
-    else:
-        print("liver eqtl fdr corrected file does not exist, running fdr")
-        liver_eqtl_fdr = fdr_analysis(liver_eqtl_raw)
-        liver_eqtl_fdr.to_csv(path)
-
-    return hypo_eqtl_fdr, liver_eqtl_fdr
-
-
-def get_fdr_corrected_qtl(qtl_raw):
-
-    path = './data/qtls.csv'
-    if os.path.isfile(path):
-        print("Reading existing qtls fdr file")
-        qtls_fdr = pd.read_csv(path, index_col=0)
-    else:
-        print("qtls fdr corrected file does not exist, running fdr")
-        qtls_fdr = fdr_analysis(hypo_eqtl_raw)
-        qtls_fdr.to_csv(path)
-
-    return qtls_fdr
-
 
 def plot_empirical_distributions(dist_df,sig_eqtl_hypo_from_qtl, sig_eqtl_liver_from_qtl, num_snps,  RE_FDR=False):
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))

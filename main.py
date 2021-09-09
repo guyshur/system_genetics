@@ -528,7 +528,7 @@ if __name__ == '__main__':
     calculate_hypotheses_and_export(hypo_triplets, hypothalamus_expression_df, shared_strains_hypo, 'data/hypothalamus_causality.csv')
 
     '''
-    path = 'bin/qtl.pkl'
+    path = 'bin/old_qtl.pkl'
     if os.path.isfile(path):
         with open(path, 'rb') as f:
             qtls = pickle.load(f)
