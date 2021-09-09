@@ -9,7 +9,7 @@ from main import num_significant_genes_per_snp, filter_genes_without_association
 import matplotlib.pyplot as plt
 import main
 
-NUM_SIMULATIONS = 100
+NUM_SIMULATIONS = 500
 
 def create_eqtl_sampling_based_distribution(qtl, eqtl1, eqtl2, NUM_SAMPLES=10, RE_FDR=False):
 
@@ -93,7 +93,7 @@ def plot_empirical_distributions(dist_df,sig_eqtl_hypo_from_qtl, sig_eqtl_liver_
                 alpha=.6, linewidths=0.5,  label='eQTL based on QTL')
 
     ax2.set_xlabel('num of significant eQTLs - Hypothalamus data')
-    plt.suptitle(f'Empiricial disribution of the number of significant eQTLs per {num_snps}')
+    plt.suptitle(f'Empirical distribution of the number of significant eQTLs per {num_snps} SNPs')
     plt.legend(loc='upper right')
     plt.legend()
     if RE_FDR:
